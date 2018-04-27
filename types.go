@@ -16,22 +16,6 @@ limitations under the License.
 
 package main
 
-type KubePod struct {
-	Type   string `json:"type"`
-	Object struct {
-		Status struct {
-			Phase string `json:"phase"`
-		} `json:"status"`
-		Spec struct {
-			SchedulerName string `json:"schedulerName"`
-		} `json:"spec"`
-		Metadata struct {
-			Name      string `json:"name"`
-			Namespace string `json:"namespace"`
-		} `json:"metadata"`
-	} `json:"object"`
-}
-
 type Node struct {
 	name string
 	time float64

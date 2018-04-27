@@ -124,7 +124,9 @@ func getBestRequestTime(nodes []string) (bestNodeFound Node, err error) {
 		err = noNodeFound
 	}
 
-	bestCachedNode.SetData(bestNodeFound)
+	if err == nil {
+		bestCachedNode.SetData(bestNodeFound)
+	}
 
 	return
 }

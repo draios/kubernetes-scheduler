@@ -124,7 +124,7 @@ If the env SDC_SCHEDULER is not set, the -s option must be provided.
 }
 
 func main() {
-	kubePod := KubePod{}
+	event := kube.KubePodEvent{}
 
 	metrics = append(metrics, map[string]interface{}{
 		"id": sysdigMetric,
@@ -135,21 +135,33 @@ func main() {
 
 	ch, _ := kubeAPI.Watch("GET", "api/v1/pods", nil, nil)
 	for data := range ch {
-		err := json.Unmarshal(data, &kubePod)
+		err := json.Unmarshal(data, &event)
 		if err != nil {
 			log.Println("Error:", err)
 			continue
 		}
 
-		if kubePod.Object.Status.Phase == "Pending" && kubePod.Object.Spec.SchedulerName == schedulerName && kubePod.Type == "ADDED" {
-			log.Println("Scheduling", kubePod.Object.Metadata.Name)
+		if event.Object.Status.Phase == "Pending" && event.Object.Spec.SchedulerName == schedulerName && event.Type == "ADDED" {
+			log.Println("Scheduling", event.Object.Metadata.Name)
 
 			bestNodeFound, err := getBestRequestTime(nodesAvailable())
 			if err != nil {
 				log.Println("Error:", err)
+				// In case a node could not be found, fallback to default scheduler
+				log.Println("Falling back to the default scheduler...")
+				deployments, err := kubeAPI.ListNamespacedDeployments(event.Object.Metadata.Namespace, "metadata.name="+event.Object.Metadata.Labels["name"])
+				if err != nil {
+					log.Panicln(err)
+				}
+				for _, item := range deployments.Items {
+					_, err := kubeAPI.ReplaceDeploymentScheduler(item, "default-scheduler")
+					if err != nil {
+						log.Fatalf("could not modify deployment %s: %s\n Fatal: those pods cannot be re-scheduled, terminating...", item.Metadata.Name, err.Error())
+					}
+				}
 			} else {
 				log.Println("Best node found: ", bestNodeFound.name, bestNodeFound.time)
-				response, err := scheduler(kubePod.Object.Metadata.Name, bestNodeFound.name, kubePod.Object.Metadata.Namespace)
+				response, err := scheduler(event.Object.Metadata.Name, bestNodeFound.name, event.Object.Metadata.Namespace)
 				if err != nil {
 					log.Println("Error:", err)
 				}

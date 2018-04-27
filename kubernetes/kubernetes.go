@@ -29,14 +29,13 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
-	"os/user"
-
-	"gopkg.in/yaml.v2"
-	"github.com/draios/kubernetes-scheduler/cache"
 	"time"
 	"net"
 	"context"
+	"bytes"
+
+	"gopkg.in/yaml.v2"
+	"github.com/draios/kubernetes-scheduler/cache"
 )
 
 type KubernetesCoreV1Api struct {
@@ -46,22 +45,61 @@ type KubernetesCoreV1Api struct {
 	serverCaCert *x509.CertPool
 }
 
-func getKubeConfigFileDefaultLocation() string {
-	kubeConf, isSet := os.LookupEnv("KUBECONFIG")
-	if isSet && kubeConf != "" {
-		return kubeConf
-	}
+func (api KubernetesCoreV1Api) ReplaceDeploymentScheduler(item KubeDeploymentItem, scheduler string) (modified KubeDeploymentItem, err error) {
+	url := fmt.Sprintf("apis/apps/v1/namespaces/%s/deployments/%s", item.Metadata.Namespace, item.Metadata.Name)
 
-	usr, err := user.Current()
+	patchRequest := []struct {
+		Op    string `json:"op"`
+		Path  string `json:"path"`
+		Value string `json:"value,omitempty"`
+	}{{
+		Op:    "add",
+		Path:  "/spec/template/spec/schedulerName",
+		Value: scheduler,
+	}}
+
+	data, err := json.Marshal(patchRequest)
 	if err != nil {
-		log.Panic(err)
+		return
 	}
-	return usr.HomeDir + "/.kube/config"
+	body := bytes.NewReader(data)
 
+	response, err := api.Request("PATCH", url, "application/json-patch+json", nil, body)
+	if err != nil {
+		return
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != 200 {
+		var responseData struct {
+			Message string `json:"message"`
+		}
+		json.NewDecoder(response.Body).Decode(&responseData)
+		err = fmt.Errorf("kubernetes: ReplaceDeploymentScheduler error code %d: %s", response.StatusCode, responseData.Message)
+		return
+	}
+
+	err = json.NewDecoder(response.Body).Decode(&modified)
+	return
+}
+
+func (api KubernetesCoreV1Api) ListNamespacedDeployments(namespace, fieldSelector string) (deployments KubeDeployments, err error) {
+
+	values := url.Values{}
+	values.Add("fieldSelector", fieldSelector)
+
+	response, err := api.Request("GET", fmt.Sprintf("apis/apps/v1/namespaces/%s/deployments", namespace), "", values, nil)
+	if err != nil {
+		return
+	}
+	defer response.Body.Close()
+
+	err = json.NewDecoder(response.Body).Decode(&deployments)
+	return
 }
 
 func (api KubernetesCoreV1Api) CreateNamespacedBinding(namespace string, body io.Reader) (response *http.Response, err error) {
-	return api.Request("POST", fmt.Sprintf("api/v1/namespaces/%s/bindings", namespace), nil, body)
+	return api.Request("POST", fmt.Sprintf("api/v1/namespaces/%s/bindings", namespace), "", nil, body)
 }
 
 func (api KubernetesCoreV1Api) Watch(httpMethod, apiMethod string, values url.Values, body io.Reader) (responseChannel chan []byte, err error) {
@@ -71,7 +109,7 @@ func (api KubernetesCoreV1Api) Watch(httpMethod, apiMethod string, values url.Va
 	values.Add("watch", "true")
 	responseChannel = make(chan []byte)
 	go func() {
-		response, err := api.Request(httpMethod, apiMethod, values, body)
+		response, err := api.Request(httpMethod, apiMethod, "", values, body)
 		if err != nil {
 			close(responseChannel)
 			return
@@ -92,7 +130,7 @@ func (api KubernetesCoreV1Api) Watch(httpMethod, apiMethod string, values url.Va
 	return
 }
 
-func (api KubernetesCoreV1Api) Request(httpMethod, apiMethod string, values url.Values, body io.Reader) (response *http.Response, err error) {
+func (api KubernetesCoreV1Api) Request(httpMethod, apiMethod, contentType string, values url.Values, body io.Reader) (response *http.Response, err error) {
 	apiUrl := api.currentApiUrlEndpoint()
 
 	certificate, caCertPool := api.currentTLSInfo()
@@ -103,12 +141,11 @@ func (api KubernetesCoreV1Api) Request(httpMethod, apiMethod string, values url.
 
 	tlsConfig.BuildNameToCertificate()
 	transport := &http.Transport{TLSClientConfig: tlsConfig, DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-		return net.DialTimeout(network, addr, 1*time.Second)
+		return net.DialTimeout(network, addr, 10*time.Second)
 	}}
 	client := http.Client{Transport: transport}
 	request, err := http.NewRequest(httpMethod, apiUrl+"/"+apiMethod, body)
 	if err != nil {
-		log.Println(err)
 		return
 	}
 	if values != nil {
@@ -116,13 +153,13 @@ func (api KubernetesCoreV1Api) Request(httpMethod, apiMethod string, values url.
 	}
 
 	// Get the info in json
-	request.Header.Add("Content-Type", "application/json")
+	if contentType == "" {
+		contentType = "application/json"
+	}
+	request.Header.Add("Content-Type", contentType)
 
 	// Make the request
 	response, err = client.Do(request)
-	if err != nil {
-		log.Println(err)
-	}
 	return
 }
 
@@ -132,7 +169,7 @@ func (api KubernetesCoreV1Api) ListNodes() (nodes []KubeNode, err error) {
 		return nodes.([]KubeNode), nil
 	}
 
-	response, err := api.Request("GET", "api/v1/nodes", nil, nil)
+	response, err := api.Request("GET", "api/v1/nodes", "", nil, nil)
 	if err != nil {
 		return
 	}
@@ -152,66 +189,6 @@ func (api KubernetesCoreV1Api) ListNodes() (nodes []KubeNode, err error) {
 	return
 }
 
-func (api KubernetesCoreV1Api) currentApiUrlEndpoint() string {
-	for _, context := range api.config.Contexts {
-		if context.Name == api.config.CurrentContext {
-			for _, cluster := range api.config.Clusters {
-				if cluster.Name == context.Data.Cluster {
-					return cluster.Data.Server
-				}
-			}
-		}
-	}
-	log.Panic("Current API Url endpoint couldn't be determined, checkout if the configuration is correct")
-	return ""
-}
-
-// Parses the cert data and generates
-func (api *KubernetesCoreV1Api) loadTLSInfo() {
-	var currentContextUser string
-	var currentContextCluster string
-	var certData []byte
-	var keyData []byte
-	var caCertData []byte
-
-	// Load current context information
-	for _, context := range api.config.Contexts {
-		if context.Name == api.config.CurrentContext {
-			currentContextUser = context.Data.User
-			currentContextCluster = context.Data.Cluster
-		}
-	}
-
-	// Get cert and key data from the user
-	for _, user := range api.config.Users {
-		if user.Name == currentContextUser {
-			certData, keyData = user.Data.ClientCertificateData, user.Data.ClientKeyData
-		}
-	}
-
-	// Get CA Cert data from current cluster
-	for _, cluster := range api.config.Clusters {
-		if cluster.Name == currentContextCluster {
-			caCertData = cluster.Data.CertificateAuthorityData
-		}
-	}
-
-	certificate, err := tls.X509KeyPair(certData, keyData)
-	if err != nil {
-		panic(err)
-	}
-
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(caCertData)
-
-	api.clientCert = certificate
-	api.serverCaCert = caCertPool
-}
-
-func (api KubernetesCoreV1Api) currentTLSInfo() (clientCert tls.Certificate, serverCaCert *x509.CertPool) {
-	return api.clientCert, api.serverCaCert
-}
-
 // Reads the configuration file and loads the config struct
 func (api *KubernetesCoreV1Api) LoadKubeConfig() (err error) {
 	yamlFile, err := ioutil.ReadFile(getKubeConfigFileDefaultLocation())
@@ -219,7 +196,7 @@ func (api *KubernetesCoreV1Api) LoadKubeConfig() (err error) {
 		panic("Could not load the Kubernetes configuration")
 	}
 
-	kubeConfig := KubeConf{}
+	var kubeConfig KubeConf
 	err = yaml.Unmarshal(yamlFile, &kubeConfig)
 	if err != nil {
 		return err
