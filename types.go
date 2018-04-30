@@ -17,7 +17,21 @@ limitations under the License.
 package main
 
 type Node struct {
-	name string
-	time float64
-	err  error
+	name   string
+	metric float64
+	err    error
+}
+
+type NodeList []Node
+
+func (n NodeList) Len() int {
+	return len(n)
+}
+
+func (n NodeList) Less(i, j int) bool {
+	return n[i].metric < n[j].metric
+}
+
+func (n NodeList) Swap(i, j int) {
+	n[i], n[j] = n[j], n[i]
 }

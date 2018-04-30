@@ -34,13 +34,14 @@ import (
 
 // Variables that will be used in our scheduler
 var (
-	schedulerName  string
-	kubeAPI        kube.KubernetesCoreV1Api
-	sysdigAPI      sysdig.SysdigApiClient
-	metrics        []map[string]interface{}
-	sysdigMetric   string
-	bestCachedNode = cache.Cache{Timeout: 15 * time.Second}
-	cachedNodes    = cache.Cache{Timeout: 15 * time.Second}
+	schedulerName     string
+	kubeAPI           kube.KubernetesCoreV1Api
+	sysdigAPI         sysdig.SysdigApiClient
+	metrics           []map[string]interface{}
+	sysdigMetric      string
+	sysdigMetricLower = true // When comparing the metrics, the lowest will be the best one
+	bestCachedNode    = cache.Cache{Timeout: 15 * time.Second}
+	cachedNodes       = cache.Cache{Timeout: 15 * time.Second}
 )
 
 // Errors
@@ -59,11 +60,11 @@ var (
 )
 
 func init() {
-	usr, _ := user.Current()
 
 	flag.Usage = usage
 	flag.Parse()
 
+	// SCD_TOKEN parameter / env var
 	if sysdigTokenEnv, tokenSetByEnv := os.LookupEnv("SDC_TOKEN"); !tokenSetByEnv && *sysdigTokenFlag == "" {
 		fmt.Println("Error: Sysdig Cloud token is not set.")
 		usage()
@@ -76,7 +77,9 @@ func init() {
 		}
 	}
 
+	// KUBECONFIG parameter / env var
 	if _, kubeTokenSetByEnv := os.LookupEnv("KUBECONFIG"); !kubeTokenSetByEnv && *kubeConfigFileFlag == "" {
+		usr, _ := user.Current()
 		os.Setenv("KUBECONFIG", usr.HomeDir+"/.kube/config")
 	} else {
 		if *kubeConfigFileFlag != "" {
@@ -85,6 +88,7 @@ func init() {
 	}
 	kubeAPI.LoadKubeConfig()
 
+	// SCD_METRIC parameter / env var
 	if sysdigMetricEnv, sysdigMetricEnvIsSet := os.LookupEnv("SDC_METRIC"); !sysdigMetricEnvIsSet && *sysdigMetricFlag == "" {
 		fmt.Println("The Sysdig metric must be defined")
 		usage()
@@ -95,8 +99,16 @@ func init() {
 		if *sysdigMetricFlag != "" {
 			sysdigMetric = *sysdigMetricFlag
 		}
+		highOrLowMetric := sysdigMetric[0]
+		if highOrLowMetric == '-' {
+			sysdigMetric = sysdigMetric[1:]
+		} else if highOrLowMetric == '+' {
+			sysdigMetric = sysdigMetric[1:]
+			sysdigMetricLower = false
+		}
 	}
 
+	// SDC_SCHEDULER parameter / env var
 	if schedulerNameEnv, schedulernameEnvIsSet := os.LookupEnv("SDC_SCHEDULER"); !schedulernameEnvIsSet && *schedulerNameFlag == "" {
 		fmt.Println("Scheduler name must be set")
 		usage()
@@ -108,15 +120,22 @@ func init() {
 			schedulerName = *schedulerNameFlag
 		}
 	}
+
+	metrics = append(metrics, map[string]interface{}{
+		"id": sysdigMetric,
+		"aggregations": map[string]string{
+			"time": "timeAvg", "group": "avg",
+		},
+	})
 }
 
 // Usage description
 func usage() {
-	fmt.Printf("Usage: %s [-s SCHEDULER_NAME] [-m SYSDIG_METRIC] [-t SYSDIG_TOKEN] [-k KUBERNETES_CONFIG_FILE]", os.Args[0])
+	fmt.Printf("Usage: %s [-s SCHEDULER_NAME] [-m [+|-]SYSDIG_METRIC] [-t SYSDIG_TOKEN] [-k KUBERNETES_CONFIG_FILE]", os.Args[0])
 	fmt.Print(`
 If the env KUBECONFIG is not set, the -k option must be provided.
 If the env SDC_TOKEN is not set, the -t option must be provided.
-If the env SDC_METRIC is not set, the -m option must be provided.
+If the env [+|-]SDC_METRIC is not set, the -m option must be provided. Sort mode: "+" higher, "-" lower. Default sort mode: lower.
 If the env SDC_SCHEDULER is not set, the -s option must be provided.
 `)
 	flag.PrintDefaults()
@@ -125,13 +144,6 @@ If the env SDC_SCHEDULER is not set, the -s option must be provided.
 
 func main() {
 	event := kube.KubePodEvent{}
-
-	metrics = append(metrics, map[string]interface{}{
-		"id": sysdigMetric,
-		"aggregations": map[string]string{
-			"time": "timeAvg", "group": "avg",
-		},
-	})
 
 	ch, _ := kubeAPI.Watch("GET", "api/v1/pods", nil, nil)
 	for data := range ch {
@@ -144,7 +156,7 @@ func main() {
 		if event.Object.Status.Phase == "Pending" && event.Object.Spec.SchedulerName == schedulerName && event.Type == "ADDED" {
 			log.Println("Scheduling", event.Object.Metadata.Name)
 
-			bestNodeFound, err := getBestRequestTime(nodesAvailable())
+			bestNodeFound, err := getBestNodeByMetrics(nodesAvailable())
 			if err != nil {
 				log.Println("Error:", err)
 				// In case a node could not be found, fallback to default scheduler
@@ -160,7 +172,7 @@ func main() {
 					}
 				}
 			} else {
-				log.Println("Best node found: ", bestNodeFound.name, bestNodeFound.time)
+				log.Println("Best node found: ", bestNodeFound.name, bestNodeFound.metric)
 				response, err := scheduler(event.Object.Metadata.Name, bestNodeFound.name, event.Object.Metadata.Namespace)
 				if err != nil {
 					log.Println("Error:", err)

@@ -26,9 +26,10 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sort"
 )
 
-func getRequestTime(hostname string) (requestTime float64, err error) {
+func getMetrics(hostname string) (metricValue float64, err error) {
 	hostFilter := fmt.Sprintf(`host.hostName = '%s'`, hostname)
 	start := -60
 	end := 0
@@ -57,7 +58,7 @@ func getRequestTime(hostname string) (requestTime float64, err error) {
 	}
 
 	if len(metricData.Data) > 0 && len(metricData.Data[0].D) > 0 {
-		requestTime = metricData.Data[0].D[0]
+		metricValue = metricData.Data[0].D[0]
 	} else {
 		err = noDataFound
 	}
@@ -65,7 +66,7 @@ func getRequestTime(hostname string) (requestTime float64, err error) {
 	return
 }
 
-func getBestRequestTime(nodes []string) (bestNodeFound Node, err error) {
+func getBestNodeByMetrics(nodes []string) (bestNodeFound Node, err error) {
 	if len(nodes) == 0 {
 		err = emptyNodeList
 		return
@@ -95,9 +96,9 @@ func getBestRequestTime(nodes []string) (bestNodeFound Node, err error) {
 			split := strings.Split(nodeName, ".")
 			nodeNameLittle := split[0]
 
-			requestTime, err := getRequestTime(nodeNameLittle)
+			metricsValue, err := getMetrics(nodeNameLittle)
 			if err == nil { // No error found, we will send the struct
-				nodeStatsChannel <- Node{name: nodeName, time: requestTime}
+				nodeStatsChannel <- Node{name: nodeName, metric: metricsValue}
 			} else {
 				nodeStatsErrorsChannel <- Node{name: nodeName, err: err}
 			}
@@ -108,19 +109,18 @@ func getBestRequestTime(nodes []string) (bestNodeFound Node, err error) {
 	close(nodeStatsChannel)
 	close(nodeStatsErrorsChannel)
 
-	bestNodeFound.time = -1
+	nodeList := NodeList{}
 	for node := range nodeStatsChannel {
-		if bestNodeFound.time == -1 || node.time < bestNodeFound.time {
-			bestNodeFound.time = node.time
-			bestNodeFound.name = node.name
-		}
+		nodeList = append(nodeList, node)
 	}
+	bestNodeFound = bestNodeFromList(nodeList)
+
 	errorHappenedString := `Error retrieving node "%s": "%s"`
 	for node := range nodeStatsErrorsChannel {
 		log.Printf(errorHappenedString+"\n", node.name, node.err.Error())
 	}
 
-	if bestNodeFound.name == "" || bestNodeFound.time == -1 {
+	if bestNodeFound.name == "" || bestNodeFound.metric == -1 {
 		err = noNodeFound
 	}
 
@@ -128,6 +128,19 @@ func getBestRequestTime(nodes []string) (bestNodeFound Node, err error) {
 		bestCachedNode.SetData(bestNodeFound)
 	}
 
+	return
+}
+
+func bestNodeFromList(list NodeList) (node Node) {
+	sort.Sort(list)
+	lenght := len(list)
+	if lenght > 0 {
+		if sysdigMetricLower {
+			return list[0] // Get the first -> Lower
+		} else {
+			return list[lenght-1] // Get the last -> Higher
+		}
+	}
 	return
 }
 
