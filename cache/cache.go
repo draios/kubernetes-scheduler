@@ -16,7 +16,10 @@ limitations under the License.
 
 package cache
 
-import "time"
+import (
+	"time"
+	"sync"
+)
 
 // Cache is a simple structure to handle caching with a duration timeout
 type Cache struct {
@@ -24,15 +27,20 @@ type Cache struct {
 	deadline time.Time
 	loaded   bool
 	data     interface{}
+	mutex    sync.Mutex
 }
 
 func (c *Cache) SetData(data interface{}) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 	c.loaded = true
 	c.data = data
 	c.deadline = time.Now().Add(c.Timeout)
 }
 
-func (c Cache) Data() (data interface{}, ok bool) {
+func (c *Cache) Data() (data interface{}, ok bool) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 	if !c.loaded || time.Now().After(c.deadline) {
 		return nil, false
 	}
