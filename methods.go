@@ -66,7 +66,11 @@ func getMetrics(hostname string) (metricValue float64, err error) {
 	return
 }
 
+var bestNodeMutex sync.Mutex
 func getBestNodeByMetrics(nodes []string) (bestNodeFound Node, err error) {
+	bestNodeMutex.Lock()
+	defer bestNodeMutex.Unlock()
+
 	if len(nodes) == 0 {
 		err = emptyNodeList
 		return
