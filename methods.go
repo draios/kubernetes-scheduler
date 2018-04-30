@@ -137,12 +137,12 @@ func getBestNodeByMetrics(nodes []string) (bestNodeFound Node, err error) {
 
 func bestNodeFromList(list NodeList) (node Node) {
 	sort.Sort(list)
-	lenght := len(list)
-	if lenght > 0 {
+	length := len(list)
+	if length > 0 {
 		if sysdigMetricLower {
 			return list[0] // Get the first -> Lower
 		} else {
-			return list[lenght-1] // Get the last -> Higher
+			return list[length-1] // Get the last -> Higher
 		}
 	}
 	return
