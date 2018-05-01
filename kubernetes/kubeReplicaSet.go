@@ -18,15 +18,9 @@ package kubernetes
 
 import "time"
 
-type KubeDeployments struct {
+type KubeReplicaSet struct {
 	Kind       string `json:"kind"`
 	APIVersion string `json:"apiVersion"`
-	Metadata struct {
-	} `json:"metadata"`
-	Items []KubeDeploymentItem `json:"items"`
-}
-
-type KubeDeploymentItem struct {
 	Metadata struct {
 		Name              string            `json:"name"`
 		Namespace         string            `json:"namespace"`
@@ -37,6 +31,14 @@ type KubeDeploymentItem struct {
 		CreationTimestamp time.Time         `json:"creationTimestamp"`
 		Labels            map[string]string `json:"labels"`
 		Annotations       map[string]string `json:"annotations"`
+		OwnerReferences []struct {
+			APIVersion         string `json:"apiVersion"`
+			Kind               string `json:"kind"`
+			Name               string `json:"name"`
+			UID                string `json:"uid"`
+			Controller         bool   `json:"controller"`
+			BlockOwnerDeletion bool   `json:"blockOwnerDeletion"`
+		} `json:"ownerReferences"`
 	} `json:"metadata"`
 	Spec struct {
 		Replicas int `json:"replicas"`
@@ -45,6 +47,7 @@ type KubeDeploymentItem struct {
 		} `json:"selector"`
 		Template struct {
 			Metadata struct {
+				Name              string            `json:"name"`
 				CreationTimestamp interface{}       `json:"creationTimestamp"`
 				Labels            map[string]string `json:"labels"`
 			} `json:"metadata"`
@@ -52,14 +55,12 @@ type KubeDeploymentItem struct {
 				Containers []struct {
 					Name  string `json:"name"`
 					Image string `json:"image"`
+					Ports []struct {
+						Name          string `json:"name"`
+						ContainerPort int    `json:"containerPort"`
+						Protocol      string `json:"protocol"`
+					} `json:"ports"`
 					Resources struct {
-						Limits struct {
-							CPU    string `json:"cpu,omitempty"`
-							Memory string `json:"memory,omitempty"`
-						} `json:"limits,omitempty"`
-						Requests struct {
-							Memory string `json:"memory"`
-						} `json:"requests"`
 					} `json:"resources"`
 					TerminationMessagePath   string `json:"terminationMessagePath"`
 					TerminationMessagePolicy string `json:"terminationMessagePolicy"`
@@ -70,31 +71,13 @@ type KubeDeploymentItem struct {
 				DNSPolicy                     string `json:"dnsPolicy"`
 				SecurityContext struct {
 				} `json:"securityContext"`
-				SchedulerName string `json:"schedulerName,omitempty"`
+				SchedulerName string `json:"schedulerName"`
 			} `json:"spec"`
 		} `json:"template"`
-		Strategy struct {
-			Type string `json:"type"`
-			RollingUpdate struct {
-				MaxUnavailable interface{} `json:"maxUnavailable"`
-				MaxSurge       interface{} `json:"maxSurge"`
-			} `json:"rollingUpdate"`
-		} `json:"strategy"`
-		RevisionHistoryLimit    int `json:"revisionHistoryLimit"`
-		ProgressDeadlineSeconds int `json:"progressDeadlineSeconds"`
 	} `json:"spec"`
 	Status struct {
-		ObservedGeneration  int `json:"observedGeneration"`
-		Replicas            int `json:"replicas"`
-		UpdatedReplicas     int `json:"updatedReplicas"`
-		UnavailableReplicas int `json:"unavailableReplicas"`
-		Conditions []struct {
-			Type               string    `json:"type"`
-			Status             string    `json:"status"`
-			LastUpdateTime     time.Time `json:"lastUpdateTime"`
-			LastTransitionTime time.Time `json:"lastTransitionTime"`
-			Reason             string    `json:"reason"`
-			Message            string    `json:"message"`
-		} `json:"conditions"`
+		Replicas             int `json:"replicas"`
+		FullyLabeledReplicas int `json:"fullyLabeledReplicas"`
+		ObservedGeneration   int `json:"observedGeneration"`
 	} `json:"status"`
 }

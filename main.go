@@ -146,7 +146,7 @@ func main() {
 
 	ch, err := kubeAPI.Watch("GET", "api/v1/pods", nil, nil)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalln("fatal: error while connecting with the kubernetes Api:", err)
 	}
 
 	for data := range ch {
@@ -158,29 +158,34 @@ func main() {
 				return
 			}
 
+			// If the pod has been added, is in Pending phase and has the scheduler name, schedule it.
 			if event.Object.Status.Phase == "Pending" && event.Object.Spec.SchedulerName == schedulerName && event.Type == "ADDED" {
 				log.Println("Scheduling", event.Object.Metadata.Name)
 
 				bestNodeFound, err := getBestNodeByMetrics(nodesAvailable())
 				if err != nil {
-					log.Println("Error:", err)
+					log.Println("error while retrieving the best node:", err.Error())
 					// In case a node could not be found, fallback to default scheduler
-					log.Println("Falling back to the default scheduler...")
-					deployments, err := kubeAPI.ListNamespacedDeployments(event.Object.Metadata.Namespace, "metadata.name="+event.Object.Metadata.Labels["name"])
+					log.Println("falling back to the default scheduler...")
+					deploymentName, err := findDeploymentNameFromPod(event.Object)
 					if err != nil {
-						log.Panicln(err)
+						log.Fatalln(err)
+					}
+					deployments, err := kubeAPI.ListNamespacedDeployments(event.Object.Metadata.Namespace, "metadata.name="+deploymentName)
+					if err != nil {
+						log.Fatalln(err)
 					}
 					for _, item := range deployments.Items {
 						_, err := kubeAPI.ReplaceDeploymentScheduler(item, "default-scheduler")
 						if err != nil {
-							log.Fatalf("could not modify deployment %s: %s\n Fatal: those pods cannot be re-scheduled, terminating...", item.Metadata.Name, err.Error())
+							log.Fatalf("could not modify deployment %s: %s\n Fatal: those pods won't be re-scheduled, terminating...", item.Metadata.Name, err.Error())
 						}
 					}
 				} else {
 					log.Println("Best node found: ", bestNodeFound.name, bestNodeFound.metric)
 					response, err := scheduler(event.Object.Metadata.Name, bestNodeFound.name, event.Object.Metadata.Namespace)
 					if err != nil {
-						log.Println("Error:", err)
+						log.Println("error while scheduling a pod:", err)
 					}
 					kubeResponse := kube.KubeResponse{}
 					err = json.NewDecoder(response.Body).Decode(&kubeResponse)

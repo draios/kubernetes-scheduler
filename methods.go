@@ -27,13 +27,15 @@ import (
 	"strings"
 	"sync"
 	"sort"
+	"github.com/draios/kubernetes-scheduler/kubernetes"
 )
 
+// Retrieves the metrics information using a name node by calling the Sysdig Api
 func getMetrics(hostname string) (metricValue float64, err error) {
 	hostFilter := fmt.Sprintf(`host.hostName = '%s'`, hostname)
-	start := -60
+	start := -60 // TODO make this configurable by params
 	end := 0
-	sampling := 60
+	sampling := 60 // TODO make this configurable by params
 
 	metricDataResponse, err := sysdigAPI.GetData(metrics, start, end, sampling, hostFilter, "host")
 	if err != nil {
@@ -67,6 +69,8 @@ func getMetrics(hostname string) (metricValue float64, err error) {
 }
 
 var bestNodeMutex sync.Mutex
+
+// Calculates the best node based in the metrics provided form a list of node names
 func getBestNodeByMetrics(nodes []string) (bestNodeFound Node, err error) {
 	bestNodeMutex.Lock()
 	defer bestNodeMutex.Unlock()
@@ -76,6 +80,7 @@ func getBestNodeByMetrics(nodes []string) (bestNodeFound Node, err error) {
 		return
 	}
 
+	// If the best node was cached, return it
 	if cachedNodes, ok := cachedNodes.Data(); ok {
 		if reflect.DeepEqual(cachedNodes, nodes) {
 			if bestNode, ok := bestCachedNode.Data(); ok {
@@ -91,6 +96,7 @@ func getBestNodeByMetrics(nodes []string) (bestNodeFound Node, err error) {
 	nodeStatsErrorsChannel := make(chan Node, len(nodes))
 
 	// Launch all requests asynchronously
+	// to retrieve the metrics of each node
 	for _, node := range nodes {
 		wg.Add(1)
 
@@ -113,21 +119,28 @@ func getBestNodeByMetrics(nodes []string) (bestNodeFound Node, err error) {
 	close(nodeStatsChannel)
 	close(nodeStatsErrorsChannel)
 
+	// Fill the list with all the succeeded nodes
 	nodeList := NodeList{}
 	for node := range nodeStatsChannel {
 		nodeList = append(nodeList, node)
 	}
-	bestNodeFound = bestNodeFromList(nodeList)
-
-	errorHappenedString := `Error retrieving node "%s": "%s"`
-	for node := range nodeStatsErrorsChannel {
-		log.Printf(errorHappenedString+"\n", node.name, node.err.Error())
-	}
-
-	if bestNodeFound.name == "" || bestNodeFound.metric == -1 {
+	if len(nodeList) == 0 {
 		err = noNodeFound
 	}
 
+	// Calculate the best node
+	bestNodeFound, err = bestNodeFromList(nodeList)
+	if err != nil {
+		return
+	}
+
+	// Print any errors found
+	errorHappenedString := `Error retrieving node "%s": "%s" \n`
+	for node := range nodeStatsErrorsChannel {
+		log.Printf(errorHappenedString, node.name, node.err.Error())
+	}
+
+	// No errors found? Cache the result
 	if err == nil {
 		bestCachedNode.SetData(bestNodeFound)
 	}
@@ -135,19 +148,23 @@ func getBestNodeByMetrics(nodes []string) (bestNodeFound Node, err error) {
 	return
 }
 
-func bestNodeFromList(list NodeList) (node Node) {
+// Sorts the list and returns the best node
+func bestNodeFromList(list NodeList) (node Node, err error) {
 	sort.Sort(list)
+
 	length := len(list)
-	if length > 0 {
-		if sysdigMetricLower {
-			return list[0] // Get the first -> Lower
-		} else {
-			return list[length-1] // Get the last -> Higher
-		}
+	if length == 0 {
+		return node, emptyNodeList
 	}
-	return
+
+	if sysdigMetricLower {
+		return list[0], nil // Get the first -> Lower
+	} else {
+		return list[length-1], nil // Get the last -> Higher
+	}
 }
 
+// Returns a list of all the available nodes found in the Kubernetes cluster
 func nodesAvailable() (readyNodes []string) {
 	if nodes, ok := cachedNodes.Data(); ok {
 		return nodes.([]string)
@@ -169,6 +186,20 @@ func nodesAvailable() (readyNodes []string) {
 	return
 }
 
+func findDeploymentNameFromPod(pod kubernetes.KubePod) (deploymentName string, err error) {
+	if pod.Metadata.OwnerReferences[0].Kind == "ReplicaSet" {
+		replicaSet, err := kubeAPI.ListNamespacedReplicaset(pod.Metadata.Namespace, pod.Metadata.OwnerReferences[0].Name)
+		if err != nil {
+			return "", err
+		}
+		if replicaSet.Metadata.OwnerReferences[0].Kind == "Deployment" {
+			return replicaSet.Metadata.OwnerReferences[0].Name, nil
+		}
+	}
+	return "", fmt.Errorf("%s is not supported yet as a OwnerReference", pod.Metadata.OwnerReferences[0].Kind)
+}
+
+// Binds a pod with a node in a namespace
 func scheduler(podName, nodeName, namespace string) (response *http.Response, err error) {
 	if namespace == "" {
 		namespace = "default"

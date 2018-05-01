@@ -232,3 +232,15 @@ func (api *KubernetesCoreV1Api) LoadKubeConfig() (err error) {
 	api.loadTLSInfo()
 	return err
 }
+
+func (api KubernetesCoreV1Api) ListNamespacedReplicaset(namespace string, replicaName string) (replicaSet KubeReplicaSet, err error){
+	endpoint := fmt.Sprintf("apis/apps/v1/namespaces/%s/replicasets/%s", namespace, replicaName)
+	response, err := api.Request("GET", endpoint, "", nil, nil)
+	if err != nil {
+		return
+	}
+	defer response.Body.Close()
+
+	err = json.NewDecoder(response.Body).Decode(&replicaSet)
+	return
+}
