@@ -37,6 +37,12 @@ go get -u -v -t github.com/draios/kubernetes-scheduler
 
 The app should be compiled in `$GOPATH/bin/kubernetes-scheduler`
 
+## TODO
+
+- Print useful events in the Kubernetes event log
+- Add timeouts & timeout handling functions
+- Abstract away the decision & metrics source functions (make this scheduler more generic and vendor neutral)
+
 ## Copyright
 
 License: Apache 2.0
@@ -46,4 +52,4 @@ Read file [LICENSE](https://github.com/draios/kubernetes-scheduler/blob/master/L
 ## Links
 
 - [Sysdig Webpage](https://sysdig.com/)
-- [Sysdig Blog](https://sysdig.com/blog/)
+- [Sysdig Custom Scheduler Blog](https://sysdig.com/blog/kubernetes-scheduler/)
