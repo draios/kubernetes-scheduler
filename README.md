@@ -53,3 +53,4 @@ Read file [LICENSE](https://github.com/draios/kubernetes-scheduler/blob/master/L
 
 - [Sysdig Webpage](https://sysdig.com/)
 - [Sysdig Custom Scheduler Blog](https://sysdig.com/blog/kubernetes-scheduler/)
+- [Sysdig Custom Scheduler KubeCon EU 2018 Talk](https://www.youtube.com/watch?v=4TaHQgG9wEg)
