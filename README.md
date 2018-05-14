@@ -1,6 +1,6 @@
-# Kubernetes Scheduler
+# Kubernetes Scheduler 
 
-## Introduction
+## Custom Kubernetes scheduler using Sysdig metrics - Introduction
 
 This repository covers the use case of creating a custom Kubernetes scheduler written in Go.
 
@@ -14,9 +14,9 @@ It's just an example of how a Scheduler could be built, but currently there are 
  
 When you write a custom scheduler you have to take all this things into account because you are on your own.
 
-You can find more information about why and how create custom Kubernetes schedulers in our [blog](https://sysdig.com/blog/kubernetes-scheduler/).
+You can find more information about why and how create [custom Kubernetes schedulers in our blog](https://sysdig.com/blog/kubernetes-scheduler/).
 
-## Requirements
+## Build requirements
 
 - [Golang](https://golang.org/) for compilation
 - Operating system:
@@ -37,11 +37,15 @@ go get -u -v -t github.com/draios/kubernetes-scheduler
 
 The app should be compiled in `$GOPATH/bin/kubernetes-scheduler`
 
-## TODO
+## Sysdig Kubernetes scheduler - TODO
 
+- Deployment as a pod
 - Print useful events in the Kubernetes event log
+- Honor node lables (Affinity, NoSchedule, etc)
 - Add timeouts & timeout handling functions
 - Abstract away the decision & metrics source functions (make this scheduler more generic and vendor neutral)
+- Add test files
+- Locks to avoid race conditions in case we deploy multiple instances
 
 ## Copyright
 
@@ -51,6 +55,7 @@ Read file [LICENSE](https://github.com/draios/kubernetes-scheduler/blob/master/L
 
 ## Links
 
+- [Kubernetes - Configure multiple schedulers](https://kubernetes.io/docs/tasks/administer-cluster/configure-multiple-schedulers/)
 - [Sysdig Webpage](https://sysdig.com/)
 - [Sysdig Custom Scheduler Blog](https://sysdig.com/blog/kubernetes-scheduler/)
 - [Sysdig Custom Scheduler KubeCon EU 2018 Talk](https://www.youtube.com/watch?v=4TaHQgG9wEg)
